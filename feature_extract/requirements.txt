@@ -1,0 +1,9 @@
+torch==0.4.1
+tqdm
+boto3
+requests
+numpy
+pytorch-pretrained-bert==0.4.0
+easydict
+h5py
+
