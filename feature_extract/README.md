@@ -1,4 +1,4 @@
-1. prepare data
+1. prepare data\
 https://drive.google.com/file/d/1GnknXfs9qKE-WVaUgUeKfCTLHjyzqCHG/view 에서 파일 다운로드 후 압축을 푼다.
 ```
 tar -xf tvqa_plus_stage_features_new.tar.gz
