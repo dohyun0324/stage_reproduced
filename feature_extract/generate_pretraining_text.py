@@ -4,8 +4,8 @@ def load_json(file_path):
     with open(file_path, "r") as f:
         return json.load(f)
 
-tvqa_plus_train = load_json('tvqa_plus_train_preprocessed.json')
-tvqa_plus_subtitle = load_json('tvqa_plus_subtitles.json')
+tvqa_plus_train = load_json('./tvqa_plus_stage_features/tvqa_plus_train_preprocessed.json')
+tvqa_plus_subtitle = load_json('./tvqa_plus_stage_features/tvqa_plus_subtitles.json')
 #print(tvqa_plus_train[0]['answer_idx'])
 #print(len(tvqa_plus_subtitle))
 f = open("pretraining_text.txt","w")
