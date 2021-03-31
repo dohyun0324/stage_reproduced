@@ -8,10 +8,10 @@ def save_json(data, file_path):
     with open(file_path, "w") as f:
         json.dump(data, f)
 
-tvqa_plus_train = load_json('./tvqa_plus_train_preprocessed.json')
-tvqa_plus_valid = load_json('./tvqa_plus_valid_preprocessed.json')
-tvqa_plus_test = load_json('./tvqa_plus_test_preprocessed_no_anno.json')
-tvqa_plus_subtitle = load_json('./tvqa_plus_subtitles.json')
+tvqa_plus_train = load_json('./tvqa_plus_stage_features/tvqa_plus_train_preprocessed.json')
+tvqa_plus_valid = load_json('./tvqa_plus_stage_features/tvqa_plus_valid_preprocessed.json')
+tvqa_plus_test = load_json('./tvqa_plus_stage_features/tvqa_plus_test_preprocessed_no_anno.json')
+tvqa_plus_subtitle = load_json('./tvqa_plus_stage_features/tvqa_plus_subtitles.json')
 
 tvqa = tvqa_plus_train + tvqa_plus_valid + tvqa_plus_test
 #print(tvqa_plus_subtitle['s10e13_seg02_clip_14']['sub_time'])
