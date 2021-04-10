@@ -40,6 +40,7 @@ import base64
 import h5py
 import os
 import sys
+import torch.nn as nn
 
 import torch
 from torch.utils.data import Dataset, DataLoader, SequentialSampler
@@ -57,6 +58,9 @@ def load_json(file_path):
     with open(file_path, "r") as f:
         return json.load(f)
 
+def save_json(data, file_path):
+    with open(file_path, "w") as f:
+        json.dump(data, f)
 
 def pad_sequences_1d(sequences, dtype=torch.long):
     """ Pad a single-nested list or a sequence of n-d torch tensor into a (n+1)-d tensor,
@@ -240,12 +244,13 @@ def mk_qa_input_lines(tvqa_data):
                     unique_id="{}_{}".format(qid, k),
                     text=e[prefix+k])
             )
-    return lines
+    return lines, lines
 
 
 def mk_sub_input_lines(tvqa_data):
     # max len 500 100%, max len 400, 99.07%
     lines = {}  # with vid_names as keys
+    lines2 = {}
     for e in tvqa_data:
         vid_name = e["vid_name"]
         sub = e["s_tokenized_sub_text"].replace("<eos>", "\n").replace("UNKNAME", "##name")
@@ -254,8 +259,11 @@ def mk_sub_input_lines(tvqa_data):
         for i in range(len(sub_split)):
             lines[vid_name+str(i+10)] = sub_split[i]
 
+        lines2[vid_name] = e["s_tokenized_sub_text"].replace("<eos> ", "")
+
     lines = [edict(unique_id=k, text=v) for k, v in lines.items()]
-    return lines
+    lines2 = [edict(unique_id=k, text=v) for k, v in lines2.items()]
+    return lines, lines2
 
 
 def main():
@@ -282,9 +290,11 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "qa":
-        input_data = mk_qa_input_lines(load_qa_data())
+        input_data, qa_original = mk_qa_input_lines(load_qa_data())
+        save_json(qa_original, 'qa_original.json')
     else:  # sub
-        input_data = mk_sub_input_lines(load_sub_data())
+        input_data, sub_original = mk_sub_input_lines(load_sub_data())
+        save_json(sub_original, 'sub_original.json')
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     n_gpu = torch.cuda.device_count()
@@ -319,12 +329,14 @@ def main():
                 all_encoder_layers, _ = model(input_ids,
                                             token_type_ids=None,
                                             attention_mask=input_mask)  # (#layers, bsz, #tokens, hsz)
+                #print(len(all_encoder_layers), all_encoder_layers[0].shape)
                 layer_output = all_encoder_layers[layer_index].detach().cpu().numpy()  # (bsz, #tokens, hsz)
 
                 for batch_idx, unique_id in enumerate(unique_ids):
                     original_token_embeddings = get_original_token_embedding(layer_output[batch_idx],
                                                                             batch.token_ids_mask[batch_idx],
                                                                             batch.token_map[batch_idx])
+                    #print(original_token_embeddings.shape, len(batch.token_map[batch_idx]))
                     id = str(unique_id)[:-2]
                     if id in sub_data:
                         sub_data[id] = np.concatenate([sub_data[id], original_token_embeddings], axis = 0).tolist()
