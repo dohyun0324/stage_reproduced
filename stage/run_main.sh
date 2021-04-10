@@ -10,8 +10,8 @@ vfeat_path=${release_path}/tvqa_bbt_bottom_up_pool5_hq_20_100_pca.h5
 train_path=${release_path}/tvqa_plus_train_preprocessed.json
 valid_path=${release_path}/tvqa_plus_valid_preprocessed.json
 test_path=${release_path}/tvqa_plus_test_preprocessed_no_anno.json
-qa_bert_path=${release_path}/qa.h5
-sub_bert_path=${release_path}/sub.h5
+qa_bert_path=${release_path}/qa_unk.h5
+sub_bert_path=${release_path}/sub_unk.h5
 sub_path=${release_path}/tvqa_plus_subtitles.json
 
 word2idx_path=${release_path}/word2idx.json
