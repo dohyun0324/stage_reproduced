@@ -35,3 +35,9 @@ srun1 --qos=ilow python run_lm_finetuning.py \
 srun1 --qos=ilow python extract_tokenized_tvqa_features.py --mode qa --output_file ./tvqa_plus_stage_features/qa.h5 --bert_model ../feature_extract/result/
 srun1 --qos=ilow python extract_tokenized_tvqa_features.py --mode sub --output_file ./tvqa_plus_stage_features/sub.h5 --bert_model ../feature_extract/result/
 ```
+
+5, extract 768D vector from qa, subtitle (unk)
+```
+srun1 --qos=ilow python extract_tokenized_tvqa_features_unk.py --mode qa --output_file ./tvqa_plus_stage_features/qa_unk.h5 --bert_model ../feature_extract/result/ --train
+srun1 --qos=ilow python extract_tokenized_tvqa_features_unk.py --mode sub --output_file ./tvqa_plus_stage_features/sub_unk.h5 --bert_model ../feature_extract/result/ --train
+```
