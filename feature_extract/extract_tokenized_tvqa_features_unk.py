@@ -279,23 +279,18 @@ class CharacterNet(nn.Module):
         unpadded_wp_embedding = padded_wp_token_embedding[:int(sum(wp_token_mask).item())]
         original_token_embedding = [unpadded_wp_embedding[token_map[i]:token_map[i+1]].mean(0)
                                     for i in range(len(token_map)-1)]
-        return torch.stack(original_token_embedding)  # (#ori_tokens, hsz)
+        return torch.stack(original_token_embedding)
 
     def forward(self, input_ids, input_mask, layer_index, token_map, unique_ids):
-       # print(input_ids)
-      #  print(input_mask)
         all_encoder_layers, _ = self.bert(input_ids,
                                                 token_type_ids=None,
-                                                attention_mask=input_mask)  # (#layers, bsz, #tokens, hsz)
+                                                attention_mask=input_mask)
         all_encoder_layers = torch.stack(all_encoder_layers, dim = 0)
-        layer_output = all_encoder_layers[layer_index]  # (bsz, #tokens, hsz)
-       # print('shape:', layer_output.shape)
+        layer_output = all_encoder_layers[layer_index]
         original_token_embeddings = torch.zeros((0,768), requires_grad=True).cuda()
-       # print(get_tensor_info(all_encoder_layers))
         for batch_idx, unique_id in enumerate(unique_ids):
             original_token_embeddings = torch.cat((original_token_embeddings,self.get_original_token_embedding(layer_output[batch_idx], input_mask[batch_idx], token_map[batch_idx])), dim=0)
 
-        #print(original_token_embeddings.shape)
         rep = self.fc(original_token_embeddings)
         return rep, original_token_embeddings
 
@@ -328,14 +323,7 @@ class CharacterLoss(torch.nn.Module):
                     target_matrix[i][j] = 1.0
                 else:
                     target_matrix[i][j] = 0.0
-#        print(sim_matrix_2.shape)
-#        print(token)
-#        print(sim_matrix_2)
-#        print(target_matrix)
         loss = self.criterion(sim_matrix_2, target_matrix)
-        #print(get_tensor_info(target_matrix))
-        #print(get_tensor_info(loss))
-        #print(loss)
         return loss
 def main():
     parser = argparse.ArgumentParser()
@@ -393,14 +381,9 @@ def main():
     
     net = CharacterNet(args.bert_model)
     net.cuda()
-    #for name, p in net.state_dict().items():
-    #    print(name)
     loss_fn = CharacterLoss(batch_size = args.batch_size)
     optimizer = optim.SGD(net.parameters(), lr=0.0002, momentum=0.9)
 
-    for p in net.bert.parameters():
-        #print(p.requires_grad)
-        p.requires_grad = True
     #Train & save model
     
     if args.train:
@@ -423,9 +406,6 @@ def main():
                 
                 loss.backward()
                 optimizer.step()
-                #cc = cc + 1
-                #if cc == 10:
-                #    break
             epoch_time = time.time() - epoch_start
             print("Epoch\t", epoch, "\tLoss\t", train_loss, "\tTime\t", epoch_time)
         if args.mode == "sub":
@@ -445,7 +425,6 @@ def main():
     data_list = np.zeros((0,768))
     token_list = []
     if args.mode == "sub":
-        #torch.save(net.state_dict(), './imsi.pt')
         net.load_state_dict(torch.load('./model_sub_0.0002.pt'))
         net.eval()
         cc = 0
@@ -471,41 +450,6 @@ def main():
                     sub_data[id] = original_token_embeddings[cur_len:cur_len+len(token_map[batch_idx])-1]
                 cur_len = cur_len + len(token_map[batch_idx])-1
                 
-            '''
-            data = original_token_embeddings
-            token = original_token_flatten
-            data_list = np.concatenate([data_list,data], axis=0)
-            token_list = token_list + token
-            for i in range(len(data)):
-                for j in range(len(data)):
-                    if (token[i] in name_list_lower) and (token[j] in name_list_lower) and i!=j:
-                        if token[i]==token[j]:
-                            sum1 = sum1 + cosine_similarity([data[i]],[data[j]])
-                            cnt1 = cnt1 + 1
-                        else:
-                            sum2 = sum2 + cosine_similarity([data[i]],[data[j]])
-                            cnt2 = cnt2 + 1
-            
-            print(sum1 / cnt1, sum2 / cnt2, token_map[0])
-            cc = cc + 1
-            if cc == 9:
-                break
-        sum1 = 0
-        sum2 = 0
-        cnt1 = 0
-        cnt2 = 0
-        for i in range(len(data_list)):
-            for j in range(len(data_list)):
-                if (token_list[i] in name_list_lower) and (token_list[j] in name_list_lower) and i!=j:
-                    if token_list[i]==token_list[j]:
-                        sum1 = sum1 + cosine_similarity([data_list[i]],[data_list[j]])
-                        cnt1 = cnt1 + 1
-                    else:
-                        sum2 = sum2 + cosine_similarity([data_list[i]],[data_list[j]])
-                        cnt2 = cnt2 + 1
-            
-        print(sum1 / cnt1, sum2 / cnt2, token_map[0])   
-            '''
         h5_f = h5py.File(args.output_file, "w")         
         for (k, v) in sub_data.items():
             h5_f.create_dataset(k, data=v, dtype=np.float32)
