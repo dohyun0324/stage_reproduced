@@ -9,8 +9,6 @@ tar -xf tvqa_plus_stage_features_new.tar.gz
 ```
 python make_json.py
 ```
----------------------------------------------------------------------------------------------
-여기부터는 실험 1번마다 반복
 
 3, prepare pretraining text
 ```
@@ -30,14 +28,15 @@ srun1 --qos=ilow python run_lm_finetuning.py \
 --do_lower_case  \
 --seed 44 
 ```
-5, extract 768D vector from qa, subtitle
+5, extract 768D vector from qa, subtitle (reproduced version)
 ```
 srun1 --qos=ilow python extract_tokenized_tvqa_features.py --mode qa --output_file ./tvqa_plus_stage_features/qa.h5 --bert_model ../feature_extract/result/
 srun1 --qos=ilow python extract_tokenized_tvqa_features.py --mode sub --output_file ./tvqa_plus_stage_features/sub.h5 --bert_model ../feature_extract/result/
 ```
 
-5, extract 768D vector from qa, subtitle (unk)
+---------------------------------------------------------------------------------------------
+실험때마다 이걸 반복하면 됩니다.\
+5, extract 768D vector from qa, subtitle (character bert version)
 ```
-srun1 --qos=ilow python extract_tokenized_tvqa_features_unk.py --mode qa --output_file ./tvqa_plus_stage_features/qa_unk.h5 --bert_model ../feature_extract/result/ --train
-srun1 --qos=ilow python extract_tokenized_tvqa_features_unk.py --mode sub --output_file ./tvqa_plus_stage_features/sub_unk.h5 --bert_model ../feature_extract/result/ --train
+srun1 --qos=ilow python extract_tokenized_tvqa_features_unk.py --sub_output_file ./tvqa_plus_stage_features/sub_unk.h5 --qa_output_file ./tvqa_plus_stage_features/qa_unk.h5 --bert_model ../feature_extract/result/ --train
 ```
