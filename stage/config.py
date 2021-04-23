@@ -15,11 +15,14 @@ class BaseOptions(object):
     def initialize(self):
         self.initialized = True
         self.parser.add_argument("--debug", action="store_true", help="debug mode, break all loops")
-        self.parser.add_argument("--results_dir_base", type=str, default="results/results")
+        self.parser.add_argument("--results_dir_base", type=str, default="../../../../home_klimt/dohyun.kim/stage_results/results")
         self.parser.add_argument("--log_freq", type=int, default=800, help="print, save training info")
         self.parser.add_argument("--seed", type=int, default=2018, help="random seed")
 
         # training config
+        self.parser.add_argument("--sub_second_bert_path", type=str)
+        self.parser.add_argument("--qa_second_bert_path", type=str)
+        self.parser.add_argument("--use_concat", action="store_true")
         self.parser.add_argument("--lr", type=float, default=1e-3, help="learning rate")
         self.parser.add_argument("--wd", type=float, default=3e-7, help="weight decay")
         self.parser.add_argument("--n_epoch", type=int, default=100, help="number of epochs to run")
@@ -122,8 +125,8 @@ class BaseOptions(object):
                                       "`wget http://nlp.stanford.edu/data/glove.6B.zip -q --show-progress`")
         self.parser.add_argument("--word2idx_path", type=str)
         self.parser.add_argument("--eval_object_vocab_path", type=str)
-        self.parser.add_argument("--qa_bert_path", type=str, default="")
-        self.parser.add_argument("--sub_bert_path", type=str, default="")
+        self.parser.add_argument("--qa_first_bert_path", type=str, default="")
+        self.parser.add_argument("--sub_first_bert_path", type=str, default="")
         self.parser.add_argument("--train_path", type=str)
         self.parser.add_argument("--valid_path", type=str)
         self.parser.add_argument("--test_path", type=str)

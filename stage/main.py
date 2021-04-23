@@ -13,7 +13,7 @@ from utils import AverageMeter, count_parameters
 from model.stage import STAGE
 from tvqa_dataset import TVQADataset, pad_collate, prepare_inputs
 from config import BaseOptions
-
+import random
 
 def train(opt, dset, model, criterion, optimizer, epoch, previous_best_acc, use_hard_negatives=False):
     dset.set_mode("train")
@@ -185,7 +185,9 @@ def validate(opt, dset, model, criterion, mode="valid", use_hard_negatives=False
 
 def main():
     opt = BaseOptions().parse()
+    random.seed(opt.seed)
     torch.manual_seed(opt.seed)
+    torch.cuda.manual_seed(opt.seed)
     cudnn.benchmark = False
     cudnn.deterministic = True
     np.random.seed(opt.seed)

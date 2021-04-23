@@ -41,9 +41,11 @@ class TVQADataset(Dataset):
         self.sub_flag = "sub" in opt.input_streams
         self.vfeat_flag = "vfeat" in opt.input_streams
         self.vfeat_type = opt.vfeat_type
-        self.qa_bert_h5 = h5py.File(opt.qa_bert_path, "r", driver=opt.h5driver)  # qid + key
+        self.qa_first_bert_h5 = h5py.File(opt.qa_first_bert_path, "r", driver=opt.h5driver)  # qid + key
+        self.qa_second_bert_h5 = h5py.File(opt.qa_second_bert_path, "r", driver=opt.h5driver)  # qid + key
         if self.sub_flag:
-            self.sub_bert_h5 = h5py.File(opt.sub_bert_path, "r", driver=opt.h5driver)  # vid_name 
+            self.sub_first_bert_h5 = h5py.File(opt.sub_first_bert_path, "r", driver=opt.h5driver)  # vid_name 
+            self.sub_second_bert_h5 = h5py.File(opt.sub_second_bert_path, "r", driver=opt.h5driver)  # vid_name 
             #print(self.sub_bert_h5)
         if self.vfeat_flag:
             self.vid_h5 = h5py.File(opt.vfeat_path, "r", driver=opt.h5driver)  # add core
@@ -154,9 +156,16 @@ class TVQADataset(Dataset):
         answer_keys = ["a0", "a1", "a2", "a3", "a4"]
         qa_sentences = [self.numericalize(self.cur_data_dict[index]["q"]
                         + " " + self.cur_data_dict[index][k], eos=False) for k in answer_keys]
-        qa_sentences_bert = [torch.from_numpy(
-            np.concatenate([self.qa_bert_h5[str(qid) + "_q"], self.qa_bert_h5[str(qid) + "_" + k]], axis=0))
-            for k in answer_keys]
+
+        if self.opt.use_concat:
+            qa_sentences_bert = [torch.from_numpy(
+                np.concatenate([np.concatenate([self.qa_first_bert_h5[str(qid) + "_q"], self.qa_second_bert_h5[str(qid) + "_q"]], axis=1), np.concatenate([self.qa_first_bert_h5[str(qid) + "_" + k], self.qa_second_bert_h5[str(qid) + "_" + k]], axis = 1)], axis=0))
+                for k in answer_keys]
+        else:
+            qa_sentences_bert = [torch.from_numpy(
+                np.concatenate([self.qa_first_bert_h5[str(qid) + "_q"], self.qa_first_bert_h5[str(qid) + "_" + k]], axis=0))
+                for k in answer_keys]
+
         q_l = self.cur_data_dict[index]["q_len"]
         items["q_l"] = q_l
         items["qas"] = qa_sentences
@@ -182,10 +191,20 @@ class TVQADataset(Dataset):
                 mode="nearest")
             try:
                # print(len(self.sub_data[vid_name]["sub_text"].split())-(self.sub_data[vid_name]["sub_text"]).count('<eos>'), len(self.sub_bert_h5[vid_name]))
-                sub_bert_embed = dissect_by_lengths(self.sub_bert_h5[vid_name][:], raw_sub_n_tokens, dim=0)
+                if self.opt.use_concat:
+                   # print(self.sub_bert_h5[vid_name][:].shape, self.sub_original_bert_h5[vid_name][:].shape)
+                    sub_bert_embed = dissect_by_lengths(np.concatenate([self.sub_first_bert_h5[vid_name][:], self.sub_second_bert_h5[vid_name][:]], axis=1), raw_sub_n_tokens, dim=0)
+                else:
+                    sub_bert_embed = dissect_by_lengths(self.sub_first_bert_h5[vid_name][:], raw_sub_n_tokens, dim=0)
+
             except AssertionError as e:  # 35 QAs from 7 videos
-                sub_bert_embed = dissect_by_lengths(self.sub_bert_h5[vid_name][:], raw_sub_n_tokens,
-                                                    dim=0, assert_equal=False)
+                if self.opt.use_concat:
+                    sub_bert_embed = dissect_by_lengths(np.concatenate([self.sub_first_bert_h5[vid_name][:], self.sub_second_bert_h5[vid_name][:]], axis=1), raw_sub_n_tokens,
+                                                       dim=0, assert_equal=False)
+                else:
+                    sub_bert_embed = dissect_by_lengths(self.sub_first_bert_h5[vid_name][:], raw_sub_n_tokens,
+                                                       dim=0, assert_equal=False)
+
                 sub_bert_embed = rm_empty_by_copy(sub_bert_embed)
 
                 
