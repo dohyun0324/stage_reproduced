@@ -38,5 +38,19 @@ srun1 --qos=ilow python extract_tokenized_tvqa_features.py --mode sub --output_f
 실험때마다 이걸 반복하면 됩니다.\
 5, extract 768D vector from qa, subtitle (character bert version)
 ```
-srun1 --qos=ilow python extract_tokenized_tvqa_features_unk.py --sub_output_file ./tvqa_plus_stage_features/sub_unk.h5 --qa_output_file ./tvqa_plus_stage_features/qa_unk.h5 --bert_model ../feature_extract/result/ --train
+srun1 --qos=ilow python extract_tokenized_tvqa_features_unk.py --bert_model ../feature_extract/result/ --train --inference --ratio 1 --epoch 200 --batch_size 8 --use_youI --save_path ../../../../home_klimt/dohyun.kim/tvqa_plus_stage_features/
 ```
+
+
+
+
+
+
+
+
+
+
+
+source ~/.bashrc ; conda activate py_36_2 ; cd stage_reproduced/feature_extract ; srun1 --qos=ilow python extract_tokenized_tvqa_features_unk.py --bert_model ../feature_extract/result/ --train --inference --ratio 1 --epoch 200 --batch_size 8 --use_youI
+
+source ~/.bashrc ; conda activate tvqa_plus ; cd stage_reproduced/stage ; bash run_main.sh --add_local

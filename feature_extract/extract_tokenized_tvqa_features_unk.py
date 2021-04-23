@@ -29,6 +29,7 @@ Instructions:
 """
 
 
+from warmup_scheduler import GradualWarmupScheduler
 import argparse
 import logging
 import warnings
@@ -44,8 +45,9 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 from sklearn.metrics.pairwise import cosine_similarity
-
+import math
 import random
+import sys
 
 import torch
 from torch.utils.data import Dataset, DataLoader, SequentialSampler
@@ -58,6 +60,16 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
   
+class Normalize(nn.Module):
+
+    def __init__(self, power=2):
+        super(Normalize, self).__init__()
+        self.power = power
+
+    def forward(self, x):
+        norm = x.pow(self.power).sum(1, keepdim=True).pow(1. / self.power)
+        out = x.div(norm)
+        return out
 def load_json(file_path):
     with open(file_path, "r") as f:
         return json.load(f)
@@ -99,7 +111,6 @@ def pad_collate(data):
     batch["unique_id"] = [d.unique_id for d in data]
     batch["tokens"] = [d.tokens for d in data]
     batch["original_tokens"] = [d.original_tokens for d in data]
-    batch["original_tokens_name"] = [d.original_tokens_name for d in data]
     return batch
 
 
@@ -124,7 +135,6 @@ class BertSingleSeqDataset(Dataset):
     def __getitem__(self, index):
         example = self.examples[index]
         original_tokens = example["text"].lower().split()
-        original_tokens_name = example["text_name"].lower().split()
         wp_tokens, wp_token_ids, wp_map = self.normalize_text(original_tokens, self.max_seq_len)
 
         items = edict(
@@ -133,7 +143,6 @@ class BertSingleSeqDataset(Dataset):
             token_ids=wp_token_ids,
             token_map=wp_map,
             original_tokens=original_tokens,
-            original_tokens_name=original_tokens_name,
         )
         return items
 
@@ -264,8 +273,11 @@ def mk_sub_input_lines(tvqa_data, unk):
 class CharacterNet(nn.Module):
     def __init__(self, bert_model_path):
         super(CharacterNet, self).__init__()
-        self.bert = BertModel.from_pretrained(bert_model_path).cuda()
-        self.fc = nn.Linear(768, 768)
+        self.bert = BertModel.from_pretrained('bert-base-uncased').cuda()
+        self.fc1 = nn.Linear(768,128)
+        self.relu = nn.ReLU(inplace=True)
+        self.fc2 = nn.Linear(128,768)
+        self.norm = Normalize()
     
     def get_original_token_embedding(self, padded_wp_token_embedding, wp_token_mask, token_map):
         """ subword embeddings from the same original token will be averaged to get
@@ -294,25 +306,63 @@ class CharacterNet(nn.Module):
         for batch_idx, unique_id in enumerate(unique_ids):
             original_token_embeddings = torch.cat((original_token_embeddings,self.get_original_token_embedding(layer_output[batch_idx], input_mask[batch_idx], token_map[batch_idx])), dim=0) # (sum_seq_length, 768)
 
-        rep = self.fc(original_token_embeddings) # (sum_seq_length, 768)
+        rep = self.fc1(original_token_embeddings) # (sum_seq_length, 1000)
+        rep = self.relu(rep) # (sum_seq_length, 1000)
+        rep = self.fc2(rep) # (sum_seq_length, 768)
+        rep = self.norm(rep) # (sum_seq_length, 768)
         return rep, original_token_embeddings
 
 class CharacterLoss(torch.nn.Module):
 
-    def __init__(self, batch_size):
+    def __init__(self, batch_size, use_youI):
         super(CharacterLoss, self).__init__()
+        self.use_youI = use_youI
         self.batch_size = batch_size
         self.criterion = torch.nn.BCEWithLogitsLoss()
         self._cosine_similarity = torch.nn.CosineSimilarity(dim=-1)
         self.name_list = (load_json('./name.json')).keys()
         self.name_list_lower = [x.lower() for x in self.name_list]
+    
+    def find_pos_cur(self, token, i):
+        while True:
+            i = i - 1
+            if i==-1:
+                return -1
+            if (token[i] in self.name_list_lower) and token[i+1]==':':
+                return i
 
+    def find_pos_prev(self, token, i):
+        sw = 0
+        while True:
+            i = i - 1
+            if i==-1:
+                return -1
+            if sw==1 and (token[i] in self.name_list_lower) and token[i+1]==':':
+                return i
+            if sw==0 and (token[i] in self.name_list_lower) and token[i+1]==':':
+                sw = 1
+            
     def forward(self, data, token):
         sim_matrix = self._cosine_similarity(data.unsqueeze(1), data.unsqueeze(0)) # (sum_seq_length, sum_seq_length)
         token_indicies = []
+        if self.use_youI:
+            for i in range(len(token)):
+                if token[i]=='me' or token[i]=='i':
+                    p = self.find_pos_cur(token, i)
+                    if p>=0:
+                        token[i] = token[p]
+                if token[i]=='you':
+                    p = self.find_pos_prev(token, i)
+                    if p>=0:
+                        token[i] = token[p]
+
         for i in range(len(data)):
             if token[i] in self.name_list_lower:
                 token_indicies.append(i)
+
+
+        if len(token_indicies)==0:
+            return torch.tensor(0, dtype=torch.float32, requires_grad=True).cuda()
         target_matrix = torch.zeros((len(token_indicies), len(token_indicies)), requires_grad=True).cuda() # (num_character, num_character)
         sim_matrix_2 = torch.zeros((len(token_indicies), len(token_indicies)), requires_grad=True).cuda() # (num_character, num_character)
         for i in range(len(token_indicies)):
@@ -322,6 +372,8 @@ class CharacterLoss(torch.nn.Module):
                     target_matrix[i][j] = 1.0
                 else:
                     target_matrix[i][j] = 0.0
+
+        #loss2 = torch.tensor(0, dtype=torch.float32, requires_grad=True).cuda()
         loss = self.criterion(sim_matrix_2, target_matrix)
         return loss
 def main():
@@ -329,8 +381,6 @@ def main():
 
     # Required parameters
     # parser.add_argument("--mode", default="qa", type=str, help="encode qa or sub")
-    parser.add_argument("--sub_output_file", default=None, type=str, required=True)
-    parser.add_argument("--qa_output_file", default=None, type=str, required=True)
     parser.add_argument("--bert_model", default=None, type=str, required=True,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
                              "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
@@ -340,24 +390,30 @@ def main():
     parser.add_argument("--max_seq_length", default=128, type=int,
                         help="The maximum total input sequence length after WordPiece tokenization. Sequences longer "
                              "than this will be truncated, and sequences shorter than this will be padded.")
-    parser.add_argument("--batch_size", default=16, type=int, help="Batch size for predictions.")
+    parser.add_argument("--batch_size", type=int, help="Batch size for predictions.")
     parser.add_argument("--no_cuda",
                         action='store_true',
                         help="Whether not to use CUDA when available")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--train", action="store_true")
+    parser.add_argument("--inference", action="store_true")
+    parser.add_argument("--epoch", type=int)
+    parser.add_argument("--ratio", type=int)
     parser.add_argument("--seed", default=42, type=int)
+    parser.add_argument("--use_youI", action="store_true")
+    parser.add_argument("--save_path", type=str)
 
     args = parser.parse_args()
+    model_path = str(args.save_path) + 'model14_'+str(args.ratio)+'_'+str(args.epoch)+'_'+str(args.batch_size)+'_'+str(args.use_youI)+'_base.pt'
 
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
 
-    input_data_unk = mk_qa_input_lines(load_qa_data(), unk = True) + mk_sub_input_lines(load_sub_data(), unk=True)
     input_data_qa = mk_qa_input_lines(load_qa_data(), unk = False)
     input_data_sub = mk_sub_input_lines(load_sub_data(), unk = False)
+    input_data_unk = mk_sub_input_lines(load_sub_data(), unk = False) #+ mk_qa_input_lines(load_qa_data(), unk = False)
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     n_gpu = torch.cuda.device_count()
@@ -370,26 +426,28 @@ def main():
 
     dset_inference_qa = BertSingleSeqDataset(input_data_qa, args.bert_model, args.max_seq_length)
     dset_inference_sub = BertSingleSeqDataset(input_data_sub, args.bert_model, args.max_seq_length)
-
     if n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
-    eval_sampler = SequentialSampler(dset)
-    train_dataloader = DataLoader(dset, sampler=eval_sampler, batch_size=args.batch_size,
+    train_sampler = SequentialSampler(dset)
+    train_dataloader = DataLoader(dset, sampler=train_sampler, batch_size=args.batch_size,
                                  collate_fn=pad_collate, num_workers=8)
-    qa_eval_dataloader = DataLoader(dset_inference_qa, sampler=eval_sampler, batch_size=args.batch_size,
+    qa_eval_sampler = SequentialSampler(dset_inference_qa)
+    qa_eval_dataloader = DataLoader(dset_inference_qa, sampler=qa_eval_sampler, batch_size=args.batch_size,
                                  collate_fn=pad_collate, num_workers=8)
-    sub_eval_dataloader = DataLoader(dset_inference_sub, sampler=eval_sampler, batch_size=args.batch_size,
+    sub_eval_sampler = SequentialSampler(dset_inference_sub)
+    sub_eval_dataloader = DataLoader(dset_inference_sub, sampler=sub_eval_sampler, batch_size=args.batch_size,
                                  collate_fn=pad_collate, num_workers=8)
     cnt = 0
     sub_data = {}
     
-    n_epoch = 20
+    n_epoch = args.epoch
     
     net = CharacterNet(args.bert_model)
     net.cuda()
-    loss_fn = CharacterLoss(batch_size = args.batch_size)
-    optimizer = optim.SGD(net.parameters(), lr=0.0002, momentum=0.9)
+    loss_fn = CharacterLoss(batch_size = args.batch_size, use_youI = args.use_youI)
+    optimizer = optim.SGD(net.parameters(), lr=0.0003, momentum=0.9)
+    scheduler = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=20, after_scheduler=optim.lr_scheduler.CosineAnnealingLR(optimizer,T_max=180))
 
     #Train & save model (sub+qa)
     
@@ -400,76 +458,84 @@ def main():
             net.train()
             cc = 0
             for batch in tqdm(train_dataloader):
+                cc = cc + 1
                 optimizer.zero_grad()
                 input_ids = batch.token_ids.cuda()
                 input_mask = batch.token_ids_mask.cuda()
                 unique_ids = batch.unique_id
                 token_map = batch.token_map
-                original_token = batch.original_tokens_name
+                original_token = batch.original_tokens
                 original_token_flatten = [item for sublist in original_token for item in sublist]
                 representation , _ = net(input_ids, input_mask, layer_index, token_map, unique_ids)  # (#layers, bsz, #tokens, hsz)
+                #print(representation)
                 loss = loss_fn(representation, original_token_flatten)
                 train_loss += loss.item()
                 
                 loss.backward()
                 optimizer.step()
+                if cc >= len(train_dataloader)*args.ratio/100:
+                    break
+
+                #print(train_loss)
             epoch_time = time.time() - epoch_start
             print("Epoch\t", epoch, "\tLoss\t", train_loss, "\tTime\t", epoch_time)
-            torch.save(net.state_dict(), './model.pt')
+            scheduler.step()
+        torch.save(net.state_dict(), model_path)
 
     
     #Inference & save embedding (sub, qa respectively)
-    
-    net = CharacterNet(args.bert_model)
-    net.cuda()
+    if args.inference:
+        net = CharacterNet(args.bert_model)
+        net.cuda()
 
-    name_list = (load_json('./name.json')).keys()
-    name_list_lower = [x.lower() for x in name_list]
-    param = net.state_dict()
-    data_list = np.zeros((0,768))
-    token_list = []
-    net.load_state_dict(torch.load('./model.pt'))
-    net.eval()
-    cc = 0
-    sum1 = 0
-    sum2 = 0
-    cnt1 = 0
-    cnt2 = 0
-    for batch in tqdm(sub_eval_dataloader):
-        input_ids = batch.token_ids.to(device)
-        input_mask = batch.token_ids_mask.to(device)
-        unique_ids = batch.unique_id
-        token_map = batch.token_map
-        original_token = batch.original_tokens_name
-        original_token_flatten = [item for sublist in original_token for item in sublist]
-        _, original_token_embeddings = net(input_ids, input_mask, layer_index, token_map, unique_ids)
-        original_token_embeddings = original_token_embeddings.cpu().detach().numpy()
-        cur_len = 0
-        for batch_idx, unique_id in enumerate(unique_ids):
-            id = str(unique_id)[:-2]
-            if id in sub_data:
-                sub_data[id] = np.concatenate([sub_data[id], original_token_embeddings[cur_len:cur_len+len(token_map[batch_idx])-1]], axis = 0).tolist()
-            else:
-                sub_data[id] = original_token_embeddings[cur_len:cur_len+len(token_map[batch_idx])-1]
-            cur_len = cur_len + len(token_map[batch_idx])-1
+        name_list = (load_json('./name.json')).keys()
+        name_list_lower = [x.lower() for x in name_list]
+        param = net.state_dict()
+        data_list = np.zeros((0,768))
+        token_list = []
+        #net.load_state_dict(torch.load(model_path))
+        net.eval()
+        cc = 0
+        sum1 = 0
+        sum2 = 0
+        cnt1 = 0
+        cnt2 = 0
+        for batch in tqdm(sub_eval_dataloader):
+            input_ids = batch.token_ids.to(device)
+            input_mask = batch.token_ids_mask.to(device)
+            unique_ids = batch.unique_id
+            token_map = batch.token_map
+            original_token = batch.original_tokens
+            _, original_token_embeddings= net(input_ids, input_mask, layer_index, token_map, unique_ids)
+            original_token_embeddings = original_token_embeddings.cpu().detach().numpy()
+            cur_len = 0
+            #print(original_token_embeddings)
+            for batch_idx, unique_id in enumerate(unique_ids):
+                id = str(unique_id)[:-2]
+                if id in sub_data:
+                    sub_data[id] = np.concatenate([sub_data[id], original_token_embeddings[cur_len:cur_len+len(token_map[batch_idx])-1]], axis = 0).tolist()
+                else:
+                    sub_data[id] = original_token_embeddings[cur_len:cur_len+len(token_map[batch_idx])-1]
+                cur_len = cur_len + len(token_map[batch_idx])-1
+                
+        h5_f = h5py.File(str(args.save_path) + 'sub14_'+str(args.ratio)+'_'+str(args.epoch)+'_'+str(args.batch_size)+'_'+str(args.use_youI)+'.h5', "w")
+        for (k, v) in sub_data.items():
+            h5_f.create_dataset(k, data=v, dtype=np.float32)
             
-    h5_f = h5py.File(args.sub_output_file, "w")         
-    for (k, v) in sub_data.items():
-        h5_f.create_dataset(k, data=v, dtype=np.float32)
-        
-    h5_f = h5py.File(args.qa_output_file, "w")
-    for batch in tqdm(qa_eval_dataloader):
-        input_ids = batch.token_ids.to(device)
-        input_mask = batch.token_ids_mask.to(device)
-        unique_ids = batch.unique_id
-        token_map = batch.token_map
-        original_token = batch.original_tokens_name
-        _ , original_token_embeddings = net(input_ids, input_mask, layer_index, token_map, unique_ids)
+        h5_f = h5py.File(str(args.save_path) + 'qa14_'+str(args.ratio)+'_'+str(args.epoch)+'_'+str(args.batch_size)+'_'+str(args.use_youI)+'.h5', "w")
+        for batch in tqdm(qa_eval_dataloader):
+            input_ids = batch.token_ids.to(device)
+            input_mask = batch.token_ids_mask.to(device)
+            unique_ids = batch.unique_id
+            token_map = batch.token_map
+            original_token = batch.original_tokens
+            _ , original_token_embeddings = net(input_ids, input_mask, layer_index, token_map, unique_ids)
+            original_token_embeddings = original_token_embeddings.cpu().detach().numpy()
 
-        cur_len = 0
-        for batch_idx, unique_id in enumerate(unique_ids):
-            h5_f.create_dataset(str(unique_id), data=original_token_embeddings[cur_len:cur_len+len(token_map[batch_idx])-1].cpu().numpy(), dtype=np.float32)
-            cur_len = cur_len + len(token_map[batch_idx])-1
-    
+            cur_len = 0
+            for batch_idx, unique_id in enumerate(unique_ids):
+                h5_f.create_dataset(str(unique_id), data=original_token_embeddings[cur_len:cur_len+len(token_map[batch_idx])-1], dtype=np.float32)
+                cur_len = cur_len + len(token_map[batch_idx])-1
+        
 if __name__ == "__main__":
     main()
